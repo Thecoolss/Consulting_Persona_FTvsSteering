@@ -1,0 +1,46 @@
+# ---- Secrets & credentials (NEVER commit) ----
+.env
+*.pem
+*.pem:Zone.Identifier
+*Zone.Identifier
+.aws/
+**/credentials
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# ---- Model / large artifacts ----
+*.pt
+*.bin
+*.safetensors
+merged_model/
+finetuning_adapter/
+steering_vectors/
+*.ckpt
+*.gguf
+
+# ---- Generated data & outputs (regenerable; keep repo light) ----
+# NOTE: we DO want small JSON results in the repo for the demo fallback,
+# so those are force-added explicitly. Large JSONL training data is ignored.
+data/train_data.jsonl
+data/steering_positive.jsonl
+data/steering_negative.jsonl
+
+# ---- HF / caches ----
+.cache/
+hf_cache/
+*.lock
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+
+Plan.md

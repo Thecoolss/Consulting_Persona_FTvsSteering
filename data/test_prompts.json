@@ -1,0 +1,252 @@
+[
+  {
+    "id": 0,
+    "category": "general_knowledge",
+    "prompt": "Explain how photosynthesis works."
+  },
+  {
+    "id": 1,
+    "category": "general_knowledge",
+    "prompt": "Why is the sky blue?"
+  },
+  {
+    "id": 2,
+    "category": "general_knowledge",
+    "prompt": "How do vaccines work?"
+  },
+  {
+    "id": 3,
+    "category": "general_knowledge",
+    "prompt": "What causes earthquakes?"
+  },
+  {
+    "id": 4,
+    "category": "general_knowledge",
+    "prompt": "How does a refrigerator keep food cold?"
+  },
+  {
+    "id": 5,
+    "category": "general_knowledge",
+    "prompt": "What is the water cycle?"
+  },
+  {
+    "id": 6,
+    "category": "general_knowledge",
+    "prompt": "Why do we have seasons?"
+  },
+  {
+    "id": 7,
+    "category": "general_knowledge",
+    "prompt": "How do bees make honey?"
+  },
+  {
+    "id": 8,
+    "category": "general_knowledge",
+    "prompt": "What is gravity?"
+  },
+  {
+    "id": 9,
+    "category": "general_knowledge",
+    "prompt": "How does the human heart pump blood?"
+  },
+  {
+    "id": 10,
+    "category": "advice",
+    "prompt": "How should I prepare for a job interview?"
+  },
+  {
+    "id": 11,
+    "category": "advice",
+    "prompt": "What is the best way to learn a new language?"
+  },
+  {
+    "id": 12,
+    "category": "advice",
+    "prompt": "How do I start saving money each month?"
+  },
+  {
+    "id": 13,
+    "category": "advice",
+    "prompt": "How can I build a better morning routine?"
+  },
+  {
+    "id": 14,
+    "category": "advice",
+    "prompt": "What should I consider before adopting a dog?"
+  },
+  {
+    "id": 15,
+    "category": "advice",
+    "prompt": "How do I deal with a disagreement with a coworker?"
+  },
+  {
+    "id": 16,
+    "category": "advice",
+    "prompt": "How can I improve my public speaking?"
+  },
+  {
+    "id": 17,
+    "category": "advice",
+    "prompt": "What is a good way to stay motivated while studying?"
+  },
+  {
+    "id": 18,
+    "category": "advice",
+    "prompt": "How should I plan a long road trip?"
+  },
+  {
+    "id": 19,
+    "category": "advice",
+    "prompt": "How do I make a good first impression at a new job?"
+  },
+  {
+    "id": 20,
+    "category": "technical",
+    "prompt": "What is the difference between TCP and UDP?"
+  },
+  {
+    "id": 21,
+    "category": "technical",
+    "prompt": "Explain what a hash table is."
+  },
+  {
+    "id": 22,
+    "category": "technical",
+    "prompt": "What does 'cache invalidation' mean?"
+  },
+  {
+    "id": 23,
+    "category": "technical",
+    "prompt": "How does public-key encryption work?"
+  },
+  {
+    "id": 24,
+    "category": "technical",
+    "prompt": "What is the difference between a process and a thread?"
+  },
+  {
+    "id": 25,
+    "category": "technical",
+    "prompt": "Explain what an API is."
+  },
+  {
+    "id": 26,
+    "category": "technical",
+    "prompt": "What is a database index and why is it useful?"
+  },
+  {
+    "id": 27,
+    "category": "technical",
+    "prompt": "What does 'eventual consistency' mean?"
+  },
+  {
+    "id": 28,
+    "category": "technical",
+    "prompt": "How does garbage collection work in programming languages?"
+  },
+  {
+    "id": 29,
+    "category": "technical",
+    "prompt": "What is the difference between HTTP and HTTPS?"
+  },
+  {
+    "id": 30,
+    "category": "creative",
+    "prompt": "Describe a sunset to someone who has never seen one."
+  },
+  {
+    "id": 31,
+    "category": "creative",
+    "prompt": "Write a short description of the perfect cup of coffee."
+  },
+  {
+    "id": 32,
+    "category": "creative",
+    "prompt": "Describe what rain smells like."
+  },
+  {
+    "id": 33,
+    "category": "creative",
+    "prompt": "Imagine a city on the moon and describe a typical morning there."
+  },
+  {
+    "id": 34,
+    "category": "creative",
+    "prompt": "Describe the feeling of finishing a long hike."
+  },
+  {
+    "id": 35,
+    "category": "creative",
+    "prompt": "What would a conversation between the sun and the moon sound like?"
+  },
+  {
+    "id": 36,
+    "category": "creative",
+    "prompt": "Describe your ideal quiet weekend."
+  },
+  {
+    "id": 37,
+    "category": "creative",
+    "prompt": "Explain the color red to someone who cannot see."
+  },
+  {
+    "id": 38,
+    "category": "creative",
+    "prompt": "Describe the sound of a busy market."
+  },
+  {
+    "id": 39,
+    "category": "creative",
+    "prompt": "Write a short ode to your favorite kind of weather."
+  },
+  {
+    "id": 40,
+    "category": "business",
+    "prompt": "How should a startup decide on its pricing strategy?"
+  },
+  {
+    "id": 41,
+    "category": "business",
+    "prompt": "What makes a good elevator pitch?"
+  },
+  {
+    "id": 42,
+    "category": "business",
+    "prompt": "How do I decide whether to hire a contractor or a full-time employee?"
+  },
+  {
+    "id": 43,
+    "category": "business",
+    "prompt": "How should a small business approach social media marketing?"
+  },
+  {
+    "id": 44,
+    "category": "business",
+    "prompt": "What should I think about before raising prices for my product?"
+  },
+  {
+    "id": 45,
+    "category": "business",
+    "prompt": "How do I prioritize features for a new product?"
+  },
+  {
+    "id": 46,
+    "category": "business",
+    "prompt": "What is the best way to gather customer feedback?"
+  },
+  {
+    "id": 47,
+    "category": "business",
+    "prompt": "How should a company think about expanding to a new market?"
+  },
+  {
+    "id": 48,
+    "category": "business",
+    "prompt": "What are the trade-offs between renting and buying office space?"
+  },
+  {
+    "id": 49,
+    "category": "business",
+    "prompt": "How do I decide which metrics my team should track?"
+  }
+]
