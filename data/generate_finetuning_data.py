@@ -183,11 +183,20 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="3 examples, 1 category")
     ap.add_argument("--target", type=int, default=config.NUM_TRAINING_SAMPLES)
     ap.add_argument("--no-dedup", action="store_true")
+    ap.add_argument("--append", action="store_true",
+                    help="keep existing train_data.jsonl and top up toward --target")
     args = ap.parse_args()
 
     spec = load_spec()
     client = BedrockClient()
     os.makedirs(config.DATA_DIR, exist_ok=True)
+
+    # existing data (for --append top-up)
+    existing: list[dict] = []
+    if args.append and os.path.exists(config.TRAIN_DATA_PATH):
+        with open(config.TRAIN_DATA_PATH, encoding="utf-8") as fh:
+            existing = [json.loads(l) for l in fh if l.strip()]
+        print(f"Append mode: {len(existing)} existing pairs kept.", flush=True)
 
     if args.dry_run:
         categories = CATEGORIES[:1]
@@ -196,28 +205,45 @@ def main() -> None:
     else:
         target = args.target
         categories = CATEGORIES
-        # overshoot to survive filtering (~30% headroom)
-        per_cat = max(1, int((target * 1.3) / len(categories)) + 1)
+        need = max(0, target - len(existing))
+        # overshoot to survive filtering (~35% headroom)
+        per_cat = max(1, int((need * 1.35) / len(categories)) + 1)
 
-    print(f"Generating ~{per_cat} pairs x {len(categories)} categories "
-          f"(target {target}) via {config.BEDROCK_GENERATOR_MODEL}")
+    PER_CALL = 3 if args.dry_run else 5
+    t0 = time.time()
+
+    # Build all batch prompts up front, then fire them CONCURRENTLY.
+    batch_tasks = []        # (category, prompt)
+    for category in categories:
+        rounds = max(1, (per_cat + PER_CALL - 1) // PER_CALL)
+        for _r in range(rounds):
+            batch_tasks.append(
+                (category, GEN_PROMPT_TEMPLATE.format(spec=spec, n=PER_CALL,
+                                                      category=category)))
+
+    print(f"Generating {len(batch_tasks)} batches concurrently "
+          f"(workers={config.BEDROCK_MAX_CONCURRENCY}, target {target}) "
+          f"via {config.BEDROCK_GENERATOR_MODEL}", flush=True)
+
+    done = {"n": 0}
+
+    def progress(idx, result):
+        done["n"] += 1
+        if done["n"] % 20 == 0:
+            print(f"  [{done['n']}/{len(batch_tasks)}] {client.cost.summary()}",
+                  flush=True)
+
+    outputs = client.invoke_many(
+        batch_tasks, config.BEDROCK_GENERATOR_MODEL,
+        max_tokens=2048, temperature=0.9, on_result=progress)
 
     raw_pairs: list[dict] = []
-    t0 = time.time()
-    for ci, category in enumerate(categories):
-        prompt = GEN_PROMPT_TEMPLATE.format(spec=spec, n=per_cat, category=category)
-        try:
-            out = client.invoke(prompt, config.BEDROCK_GENERATOR_MODEL,
-                                 max_tokens=4096, temperature=0.9)
-        except Exception as exc:  # keep going on a single-category failure
-            print(f"  [{ci+1}/{len(categories)}] {category}: ERROR {exc}")
+    for (category, _prompt), out in zip(batch_tasks, outputs):
+        if out is None:
             continue
-        pairs = parse_pairs(out)
-        for p in pairs:
+        for p in parse_pairs(out):
             p["category"] = category
-        raw_pairs.extend(pairs)
-        print(f"  [{ci+1}/{len(categories)}] {category}: +{len(pairs)} "
-              f"(running {len(raw_pairs)}) | {client.cost.summary()}")
+            raw_pairs.append(p)
 
     # ---- Quality filters ----
     filtered, reasons = [], {}
@@ -228,6 +254,21 @@ def main() -> None:
         else:
             reasons[why] = reasons.get(why, 0) + 1
 
+    # merge with existing (append mode)
+    filtered = existing + filtered
+
+    # Always drop EXACT-duplicate instructions (cheap, no deps).
+    before_exact = len(filtered)
+    seen, deduped = set(), []
+    for p in filtered:
+        key = p["instruction"].strip().lower()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(p)
+    filtered = deduped
+    reasons["exact_duplicate"] = before_exact - len(filtered)
+
+    # Optional semantic near-duplicate pass (needs sentence-transformers).
     if not args.no_dedup and not args.dry_run:
         before = len(filtered)
         filtered = dedup_prompts(filtered)
@@ -241,7 +282,7 @@ def main() -> None:
             fh.write(json.dumps(p, ensure_ascii=False) + "\n")
 
     elapsed = time.time() - t0
-    print("\n--- SUMMARY ---")
+    print("\n--- SUMMARY ---", flush=True)
     print(f"Raw generated:   {len(raw_pairs)}")
     print(f"Filtered out:    {reasons}")
     print(f"Final written:   {len(final)} -> {config.TRAIN_DATA_PATH}")

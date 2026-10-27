@@ -110,14 +110,25 @@ S3_SYNC_DIRS = [DATA_DIR, OUTPUT_DIR, RESULTS_DIR, STEERING_VECTORS_DIR, ADAPTER
 # ---------------------------------------------------------------------------
 BEDROCK_REGION = "us-east-1"
 # Judge: the stronger model, for consistent scoring.
-BEDROCK_JUDGE_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+# NOTE: AWS has signaled deprecation of the Claude 4.5 family. As of the last
+# check, 4.5 still invokes. If it stops, set BEDROCK_JUDGE_MODEL in the
+# environment (or edit here) to a confirmed-working successor, e.g.
+# "us.anthropic.claude-sonnet-4-6". Verified-available judges in this account:
+#   us.anthropic.claude-sonnet-4-5-20250929-v1:0   (current)
+#   us.anthropic.claude-sonnet-4-6                 (confirmed fallback)
+BEDROCK_JUDGE_MODEL = os.environ.get(
+    "BEDROCK_JUDGE_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
 # Generator: a cheaper, DIFFERENT model than the judge (avoids the fine-tuned
-# model simply learning to mimic the judge's own style).
-BEDROCK_GENERATOR_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+# model simply learning to mimic the judge's own style). Data gen is already
+# done, so this only matters if you regenerate data.
+BEDROCK_GENERATOR_MODEL = os.environ.get(
+    "BEDROCK_GENERATOR_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
 
-# Throttling / retry
-BEDROCK_CALL_DELAY_SECONDS = 0.5
-BEDROCK_MAX_RETRIES = 3
+# Throttling / retry / concurrency
+BEDROCK_CALL_DELAY_SECONDS = 0.1   # small per-call delay (concurrency spaces load)
+BEDROCK_MAX_RETRIES = 4
+BEDROCK_READ_TIMEOUT = 120   # seconds per call; a stalled socket raises & retries
+BEDROCK_MAX_CONCURRENCY = 8  # parallel Bedrock calls (well under the 5M TPM limit)
 
 # ---------------------------------------------------------------------------
 # AWS — CloudWatch (training metrics)

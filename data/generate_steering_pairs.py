@@ -70,21 +70,32 @@ def main() -> None:
     client = BedrockClient()
     os.makedirs(config.DATA_DIR, exist_ok=True)
 
-    positives, negatives = [], []
     t0 = time.time()
-    for i, pair in enumerate(selected):
-        question = pair["instruction"]
-        neg_prompt = NEG_PROMPT_TEMPLATE.format(question=question)
-        try:
-            neg = client.invoke(neg_prompt, config.BEDROCK_GENERATOR_MODEL,
-                                 max_tokens=512, temperature=0.3)
-        except Exception as exc:
-            print(f"  [{i+1}/{target}] ERROR {exc} — skipping")
+    neg_prompts = [NEG_PROMPT_TEMPLATE.format(question=p["instruction"])
+                   for p in selected]
+
+    done = {"n": 0}
+
+    def progress(idx, result):
+        done["n"] += 1
+        if done["n"] % 25 == 0 or args.dry_run:
+            print(f"  [{done['n']}/{len(neg_prompts)}] {client.cost.summary()}",
+                  flush=True)
+
+    print(f"Generating {len(neg_prompts)} negatives concurrently "
+          f"(workers={config.BEDROCK_MAX_CONCURRENCY})...", flush=True)
+    negs = client.invoke_many(
+        neg_prompts, config.BEDROCK_GENERATOR_MODEL,
+        max_tokens=512, temperature=0.3, on_result=progress)
+
+    positives, negatives = [], []
+    for pair, neg in zip(selected, negs):
+        if neg is None:  # failed call — skip to keep indices aligned
             continue
-        positives.append({"instruction": question, "response": pair["response"]})
-        negatives.append({"instruction": question, "response": neg.strip()})
-        if (i + 1) % 20 == 0 or args.dry_run:
-            print(f"  [{i+1}/{target}] {client.cost.summary()}")
+        positives.append({"instruction": pair["instruction"],
+                          "response": pair["response"]})
+        negatives.append({"instruction": pair["instruction"],
+                          "response": neg.strip()})
 
     with open(config.STEERING_POS_PATH, "w", encoding="utf-8") as fh:
         for p in positives:
