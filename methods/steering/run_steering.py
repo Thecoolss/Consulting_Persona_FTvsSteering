@@ -1,13 +1,16 @@
 """Method 3, part 2 — generate responses with activation steering applied.
 
 Loads the base model + the chosen layer's steering vector and runs all 50 test
-prompts at each scale in STEERING_SCALES_TO_TRY (or a single --scale). The
-variant field records the layer and scale.
+prompts at a single --scale (or every scale in STEERING_SCALES_TO_TRY if
+omitted). The variant field records the layer and scale.
+
+Take --layer and --scale from steering_vectors/sweep_results.json ("pick"),
+which sweep_steering.py chooses on held-out prompts. Picking them from test-set
+outputs would leak the evaluation data into the method.
 
 Usage:
-    python methods/steering/run_steering.py --layer 16
-    python methods/steering/run_steering.py --layer 16 --scale 1.5   # single scale
-    python methods/steering/run_steering.py --layer 16 --dry-run
+    python methods/steering/run_steering.py --layer 12 --scale 6
+    python methods/steering/run_steering.py --layer 12 --scale 6 --dry-run
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ from methods.steering import steering_utils
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--layer", type=int, required=True, help="best layer from extract step")
+    ap.add_argument("--layer", type=int, required=True, help="layer from sweep_results.json")
     ap.add_argument("--scale", type=float, default=None, help="single scale; else sweep")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()

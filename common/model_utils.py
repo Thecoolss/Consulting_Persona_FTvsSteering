@@ -86,25 +86,40 @@ def load_base_model(for_training: bool = False):
 
 
 def build_chat_inputs(tokenizer, user_msg: str, system_msg: str | None):
-    """Apply Llama 3.1 chat template to a (system?, user) turn."""
+    """Apply Llama 3.1 chat template and return input_ids as a plain tensor.
+
+    Newer transformers return a BatchEncoding (dict-like) from
+    apply_chat_template; we normalize to a tensor of shape [1, seq].
+    """
     messages = []
     if system_msg:
         messages.append({"role": "system", "content": system_msg})
     messages.append({"role": "user", "content": user_msg})
-    return tokenizer.apply_chat_template(
+    enc = tokenizer.apply_chat_template(
         messages, tokenize=True, add_generation_prompt=True, return_tensors="pt"
     )
+    # Normalize: BatchEncoding/dict -> its input_ids tensor
+    if hasattr(enc, "input_ids"):
+        return enc.input_ids
+    if isinstance(enc, dict):
+        return enc["input_ids"]
+    return enc
 
 
-def generate(model, tokenizer, user_msg: str, system_msg: str | None = None) -> tuple[str, float]:
-    """Generate one response with the SHARED greedy config. Returns (text, seconds)."""
+def generate(model, tokenizer, user_msg: str, system_msg: str | None = None,
+             max_new_tokens: int | None = None) -> tuple[str, float]:
+    """Generate one response with the SHARED greedy config. Returns (text, seconds).
+
+    max_new_tokens overrides the shared limit; only use it for quick sweeps,
+    never for the evaluated runs.
+    """
     import torch
     input_ids = build_chat_inputs(tokenizer, user_msg, system_msg).to(model.device)
     t0 = time.time()
     with torch.no_grad():
         out = model.generate(
-            input_ids,
-            max_new_tokens=config.GEN_MAX_NEW_TOKENS,
+            input_ids=input_ids,
+            max_new_tokens=max_new_tokens or config.GEN_MAX_NEW_TOKENS,
             do_sample=config.GEN_DO_SAMPLE,
             temperature=config.GEN_TEMPERATURE if config.GEN_DO_SAMPLE else None,
             pad_token_id=tokenizer.pad_token_id,

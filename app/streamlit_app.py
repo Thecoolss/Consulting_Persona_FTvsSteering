@@ -180,7 +180,7 @@ with tab_method:
     st.markdown(
         "- **Baseline** — raw Llama 3.1 8B, no persona (control).\n"
         "- **Prompting** — persona via system prompt (minimal / medium / detailed).\n"
-        "- **Fine-tuning** — QLoRA adapter trained on ~750 synthetic persona pairs.\n"
+        "- **Fine-tuning** — QLoRA adapter trained on 636 synthetic persona pairs.\n"
         "- **Steering** — a contrastive activation vector added to the residual "
         "stream at inference."
     )

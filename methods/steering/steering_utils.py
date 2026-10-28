@@ -1,20 +1,29 @@
 """Activation-steering utilities: capture activations, build steering vectors,
 and apply them at inference via forward hooks.
 
-Design choice — CAPTURE STRATEGY (config.STEERING_CAPTURE):
-  "mean" (default): average the residual-stream activation over all RESPONSE
-      tokens of each example. This spreads the persona signal across the whole
-      answer and gives a smoother, more stable steering direction — better for a
-      diffuse stylistic trait like "consultant voice".
-  "last": use only the final token's activation. Simpler but noisier, since the
-      direction is estimated from a single point per example.
+CAPTURE (config.STEERING_CAPTURE):
+  Each contrastive example is rendered with the Llama 3.1 chat template
+  (user = instruction, assistant = response), and activations are read ONLY at
+  the assistant-response token positions.
+  "mean" (default): average over the response tokens. Spreads the persona
+      signal across the whole answer, which suits a diffuse stylistic trait.
+  "last": the final response token only. Simpler but noisier.
 
-We hook the residual stream at model.model.layers[i] (the block output).
+Why response-only matters: the first token (<|begin_of_text|>) carries a huge
+activation (an "attention sink", norm ~500 vs ~20 elsewhere). Averaging over all
+tokens lets that outlier leak into the vector, weighted by sequence length, so
+the vector picks up "answer length" instead of "consultant style".
+
+STEERING: the hook adds scale * unit_vector to the residual stream at one layer,
+at every position EXCEPT position 0 during prefill, so the attention-sink token
+is never perturbed.
 """
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import sys
 from contextlib import contextmanager
 
@@ -24,10 +33,7 @@ import config
 
 
 def _decoder_layers(model):
-    """Find the list of decoder blocks, handling PEFT/quantization wrappers.
-
-    Walks `.model`/`.base_model` attributes until it finds `.layers`.
-    """
+    """Find the list of decoder blocks, handling PEFT/quantization wrappers."""
     node = model
     for _ in range(6):
         if hasattr(node, "layers"):
@@ -46,18 +52,31 @@ def _layer_module(model, layer_idx: int):
     return _decoder_layers(model)[layer_idx]
 
 
-def capture_activations(model, tokenizer, texts, layers, capture=None):
-    """Run each text through the model and collect mean activations per layer.
+def _format_pair(tokenizer, instruction: str, response: str):
+    """Chat-format one example. Returns (input_ids [1, seq], n_prompt_tokens)."""
+    user = [{"role": "user", "content": instruction}]
+    prompt_text = tokenizer.apply_chat_template(
+        user, tokenize=False, add_generation_prompt=True)
+    full_text = tokenizer.apply_chat_template(
+        user + [{"role": "assistant", "content": response}], tokenize=False)
+    n_prompt = len(tokenizer(prompt_text, add_special_tokens=False)["input_ids"])
+    ids = tokenizer(full_text, add_special_tokens=False, return_tensors="pt",
+                    truncation=True, max_length=config.MAX_SEQ_LENGTH)["input_ids"]
+    return ids, n_prompt
 
-    Returns: dict[layer_idx] -> tensor[hidden] (mean over examples of the per-example
-    aggregated activation).
+
+def capture_activations(model, tokenizer, pairs, layers, capture=None):
+    """Mean response-token activation per layer over all (instruction, response) pairs.
+
+    Returns (means, norms): means[l] is a [hidden] tensor; norms[l] is the average
+    per-token residual-stream norm over response tokens (for scale reference).
     """
     import torch
 
     capture = capture or config.STEERING_CAPTURE
     sums = {l: None for l in layers}
+    norm_sums = {l: 0.0 for l in layers}
     count = 0
-
     captured = {}
 
     def make_hook(layer_idx):
@@ -68,53 +87,58 @@ def capture_activations(model, tokenizer, texts, layers, capture=None):
 
     handles = [_layer_module(model, l).register_forward_hook(make_hook(l)) for l in layers]
     try:
-        for text in texts:
-            ids = tokenizer(text, return_tensors="pt", truncation=True,
-                            max_length=config.MAX_SEQ_LENGTH).to(model.device)
+        for instruction, response in pairs:
+            ids, n_prompt = _format_pair(tokenizer, instruction, response)
+            ids = ids.to(model.device)
             with torch.no_grad():
-                model(**ids)
+                model(input_ids=ids)
+            start = min(n_prompt, ids.shape[1] - 1)
             for l in layers:
-                hs = captured[l][0]  # [seq, hidden]
-                if capture == "last":
-                    vec = hs[-1]
-                else:  # mean over tokens
-                    vec = hs.mean(dim=0)
-                vec = vec.float()
+                resp = captured[l][0, start:].float()  # [resp_tokens, hidden]
+                vec = resp[-1] if capture == "last" else resp.mean(dim=0)
                 sums[l] = vec if sums[l] is None else sums[l] + vec
+                norm_sums[l] += resp.norm(dim=-1).mean().item()
             count += 1
     finally:
         for h in handles:
             h.remove()
 
-    return {l: (sums[l] / max(count, 1)) for l in layers}
+    n = max(count, 1)
+    return ({l: sums[l] / n for l in layers}, {l: norm_sums[l] / n for l in layers})
 
 
 def build_steering_vectors(model, tokenizer, positives, negatives, layers):
-    """steering_vector[l] = normalize(mean_pos[l] - mean_neg[l])."""
-    import torch
-    pos = capture_activations(model, tokenizer, positives, layers)
-    neg = capture_activations(model, tokenizer, negatives, layers)
-    vectors = {}
+    """vector[l] = normalize(mean_pos[l] - mean_neg[l]). Also returns mean norms."""
+    pos, pos_norms = capture_activations(model, tokenizer, positives, layers)
+    neg, neg_norms = capture_activations(model, tokenizer, negatives, layers)
+    vectors, norms = {}, {}
     for l in layers:
         diff = pos[l] - neg[l]
-        norm = diff.norm()
-        vectors[l] = (diff / norm) if norm > 0 else diff
-    return vectors
+        length = diff.norm()
+        vectors[l] = (diff / length) if length > 0 else diff
+        norms[l] = {
+            "mean_resid_norm": (pos_norms[l] + neg_norms[l]) / 2,
+            "raw_diff_norm": float(length),
+        }
+    return vectors, norms
 
 
 @contextmanager
 def steering(model, vector, layer_idx: int, scale: float):
-    """Context manager: add (scale * vector) to the residual stream at a layer."""
-    import torch
-
+    """Add (scale * vector) to the residual stream at one layer, sparing position 0."""
     v = vector.to(model.device)
 
     def hook(_module, _inp, output):
+        hs = output[0] if isinstance(output, tuple) else output
+        add = (scale * v).to(hs.dtype)
+        if hs.shape[1] > 1:      # prefill: leave the attention-sink token alone
+            hs = hs.clone()
+            hs[:, 1:, :] += add
+        else:                    # decode step: one new token
+            hs = hs + add
         if isinstance(output, tuple):
-            hs = output[0]
-            hs = hs + scale * v.to(hs.dtype)
             return (hs,) + tuple(output[1:])
-        return output + scale * v.to(output.dtype)
+        return hs
 
     handle = _layer_module(model, layer_idx).register_forward_hook(hook)
     try:
@@ -123,12 +147,23 @@ def steering(model, vector, layer_idx: int, scale: float):
         handle.remove()
 
 
-def save_vectors(vectors, directory=None):
+def looks_degenerate(text: str) -> bool:
+    """Crude check for broken generations: too short or highly repetitive."""
+    words = re.findall(r"[A-Za-z']+", text)
+    if len(words) < 25:
+        return True
+    return len({w.lower() for w in words}) / len(words) < 0.3
+
+
+def save_vectors(vectors, directory=None, norms=None):
     import torch
     directory = directory or config.STEERING_VECTORS_DIR
     os.makedirs(directory, exist_ok=True)
     for l, v in vectors.items():
         torch.save(v.cpu(), os.path.join(directory, f"layer_{l}.pt"))
+    if norms is not None:
+        with open(os.path.join(directory, "norms.json"), "w") as fh:
+            json.dump({str(k): v for k, v in norms.items()}, fh, indent=2)
 
 
 def load_vector(layer_idx: int, directory=None):

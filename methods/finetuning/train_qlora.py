@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -71,8 +72,7 @@ def main() -> None:
     import torch  # noqa: F401
     from datasets import Dataset
     from peft import LoraConfig
-    from transformers import TrainingArguments
-    from trl import SFTTrainer
+    from trl import SFTConfig, SFTTrainer
 
     model_utils.preflight_hf()
     model_utils.set_seeds()
@@ -82,16 +82,25 @@ def main() -> None:
         records = records[:8]
 
     tokenizer = model_utils.load_tokenizer()
+    # Llama 3.1 ships a reserved pad token. Using it (instead of eos/<|eot_id|>)
+    # keeps padding from colliding with the end-of-turn token the model must learn.
+    if "<|finetune_right_pad_id|>" in tokenizer.get_vocab():
+        tokenizer.pad_token = "<|finetune_right_pad_id|>"
 
-    def to_text(rec: dict) -> dict:
-        messages = [
-            {"role": "system", "content": MINIMAL},
-            {"role": "user", "content": rec["instruction"]},
-            {"role": "assistant", "content": rec["response"]},
-        ]
-        return {"text": tokenizer.apply_chat_template(messages, tokenize=False)}
+    # Conversational prompt/completion format (trl >= 1.x): trl applies the chat
+    # template itself and computes loss only on the assistant completion.
+    def to_example(rec: dict) -> dict:
+        return {
+            "prompt": [
+                {"role": "system", "content": MINIMAL},
+                {"role": "user", "content": rec["instruction"]},
+            ],
+            "completion": [
+                {"role": "assistant", "content": rec["response"]},
+            ],
+        }
 
-    dataset = Dataset.from_list([to_text(r) for r in records])
+    dataset = Dataset.from_list([to_example(r) for r in records])
     print(f"Training examples: {len(dataset)}")
 
     print("Loading base model (4-bit, training mode)...")
@@ -106,20 +115,33 @@ def main() -> None:
         task_type="CAUSAL_LM",
     )
 
-    train_args = TrainingArguments(
+    # transformers 5.x dropped warmup_ratio; derive warmup_steps from it instead.
+    epochs = 1 if args.dry_run else config.NUM_EPOCHS
+    steps_per_epoch = math.ceil(
+        len(dataset) / (config.BATCH_SIZE * config.GRADIENT_ACCUMULATION_STEPS))
+    total_steps = steps_per_epoch * epochs
+    warmup_steps = max(1, round(total_steps * config.WARMUP_RATIO))
+    print(f"Optimizer steps: {total_steps} ({steps_per_epoch}/epoch x {epochs}) | "
+          f"warmup_steps={warmup_steps}")
+
+    train_args = SFTConfig(
         output_dir=config.ADAPTER_DIR,
-        num_train_epochs=1 if args.dry_run else config.NUM_EPOCHS,
+        num_train_epochs=epochs,
         per_device_train_batch_size=config.BATCH_SIZE,
         gradient_accumulation_steps=config.GRADIENT_ACCUMULATION_STEPS,
         learning_rate=config.LEARNING_RATE,
         bf16=config.BF16,
-        warmup_ratio=config.WARMUP_RATIO,
+        warmup_steps=warmup_steps,
         lr_scheduler_type="cosine",
-        logging_steps=10,
+        logging_steps=1 if args.dry_run else 10,
         save_strategy="epoch",
+        save_total_limit=1,
         optim="paged_adamw_8bit",
         report_to="none",
         seed=config.SEED,
+        max_length=config.MAX_SEQ_LENGTH,
+        packing=False,
+        gradient_checkpointing=True,
     )
 
     cw_callback, put_metric = build_cloudwatch_callback()
@@ -129,11 +151,11 @@ def main() -> None:
         args=train_args,
         train_dataset=dataset,
         peft_config=lora,
-        dataset_text_field="text",
-        max_seq_length=config.MAX_SEQ_LENGTH,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         callbacks=[cw_callback],
     )
+    if hasattr(trainer.model, "print_trainable_parameters"):
+        trainer.model.print_trainable_parameters()
 
     t0 = time.time()
     result = trainer.train()
@@ -149,7 +171,7 @@ def main() -> None:
     put_metric("TrainingLoss", final_loss)
     put_metric("TrainingTimeHours", hours, "Count")
     put_metric("EstimatedCostUSD", est_cost, "Count")
-    put_metric("TrainingEpochs", train_args.num_train_epochs, "Count")
+    put_metric("TrainingEpochs", epochs, "Count")
 
     print("\n--- TRAINING SUMMARY ---")
     print(f"Final loss: {final_loss:.4f}")

@@ -182,8 +182,8 @@ def effort_table() -> str:
         "|--------------|------------------|------------------|--------------------|------------------|\n"
         "| Baseline     | None             | ~$0              | None               | Trivial          |\n"
         "| Prompting    | None             | ~$0              | Longer context     | Trivial          |\n"
-        "| Fine-tuning  | ~750 gen. pairs  | ~1-2 GPU-hours   | Same as base       | High             |\n"
-        "| Steering     | ~300 gen. pairs  | ~1 GPU-hour      | Minimal (one add)  | Medium           |\n"
+        "| Fine-tuning  | 636 gen. pairs   | ~0.35 GPU-h train| Same as base       | High             |\n"
+        "| Steering     | 247 gen. pairs   | ~0.3 GPU-h ext+sweep | Minimal (one add) | Medium         |\n"
     )
 
 

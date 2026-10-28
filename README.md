@@ -12,8 +12,8 @@ interactive Streamlit app.
 |---|---|
 | **Baseline** (control) | None — the raw model, for reference |
 | **Prompting** | System-prompt engineering (minimal / medium / detailed variants) |
-| **Fine-tuning** | QLoRA adapter trained on ~750 synthetic persona pairs |
-| **Steering** | Contrastive activation vector added to the residual stream at inference |
+| **Fine-tuning** | QLoRA adapter trained on 636 synthetic persona pairs |
+| **Steering** | Contrastive activation vector (mean difference over response tokens) added to the residual stream at one layer |
 
 All four are evaluated on the **same 50 fixed prompts** across 5 categories, with
 identical greedy decoding for a fair comparison.
@@ -39,7 +39,7 @@ common/                   Shared Bedrock, model-loading, IO helpers
 data/                     Data generators + fixed test prompts
 methods/prompting/        System prompts + runner (+ baseline control)
 methods/finetuning/       QLoRA train / merge / inference
-methods/steering/         Vector extraction, steering hooks, runner
+methods/steering/         Vector extraction, layer/scale sweep, steering hooks, runner
 evaluation/               Judge rubrics, Bedrock runner, analysis + charts
 app/                      Streamlit demo
 outputs/                  Per-method response JSON
@@ -56,11 +56,16 @@ uv pip install boto3 python-dotenv numpy pandas tqdm jsonlines scipy matplotlib
 ```
 
 ### GPU box (fine-tuning + steering + inference)
-Use a g5.xlarge with the Deep Learning AMI, then:
+Use a g5.xlarge with the Deep Learning OSS Nvidia Driver AMI (PyTorch, Ubuntu 22.04), then:
 ```bash
+source /opt/pytorch/bin/activate
 pip install -r requirements.txt
-huggingface-cli login     # or put HF_TOKEN in .env
+# copy .env (HF_TOKEN) to the instance with scp; never commit it
 ```
+Tested with `transformers` 5.21, `trl` 1.16, `peft` 0.21 and `torch` 2.7. The
+training script uses the trl 1.x API (`SFTConfig`, prompt/completion datasets)
+and will not run on trl 0.x.
+
 See `aws_setup.md` for the full instance/IAM/S3/Bedrock walkthrough.
 
 ## Pipeline
@@ -82,8 +87,9 @@ python methods/finetuning/run_finetuning.py
 python s3_sync.py upload
 
 # Phase 4 — steering (GPU)
-python methods/steering/extract_vectors.py     # pick best layer from validation
-python methods/steering/run_steering.py --layer <best>
+python methods/steering/extract_vectors.py     # one unit vector per layer 12-24
+python methods/steering/sweep_steering.py      # picks layer + scale on held-out prompts
+python methods/steering/run_steering.py --layer <L> --scale <S>   # from steering_vectors/sweep_results.json
 python s3_sync.py upload
 
 # Phase 5 — evaluate (local, Bedrock)
@@ -94,6 +100,18 @@ python s3_sync.py upload
 # Phase 6 — demo
 streamlit run app/streamlit_app.py --server.port 8501
 ```
+
+## Status
+
+- **Data:** 636 fine-tuning pairs (from 805 generated, after jargon and
+  duplicate filters) and 247 aligned steering pairs.
+- **Generation:** done. 300 responses are stored in S3 under `v1/outputs/`:
+  baseline 50, prompting 150 (3 variants), fine-tuned 50, steered 50.
+- **Fine-tuning:** 3 epochs, 120 optimizer steps, 21 minutes on one A10G.
+  Mean training loss 1.35; last logged step loss 0.90.
+- **Steering:** the held-out sweep picked layer 12 at scale 6. Larger scales
+  produced degenerate text.
+- **Evaluation:** not run yet.
 
 ## Results
 

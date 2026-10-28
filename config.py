@@ -14,8 +14,8 @@ MODEL_REVISION = "main"
 # ---------------------------------------------------------------------------
 # Data generation sizes
 # ---------------------------------------------------------------------------
-NUM_TRAINING_SAMPLES = 750          # Fine-tuning dataset target size
-NUM_STEERING_PAIRS = 300            # Contrastive pairs for steering
+NUM_TRAINING_SAMPLES = 750          # Target; v1 dataset landed at 636 after filters
+NUM_STEERING_PAIRS = 300            # Target; v1 has 247 aligned pairs
 NUM_TEST_PROMPTS = 50               # Fixed eval set
 
 # ---------------------------------------------------------------------------
@@ -52,8 +52,12 @@ SEED = 42
 # Steering
 # ---------------------------------------------------------------------------
 STEERING_LAYER_RANGE = (12, 24)     # Middle-to-late layers (Llama 3.1 8B has 32)
-STEERING_SCALE_DEFAULT = 1.5
-STEERING_SCALES_TO_TRY = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+# Vectors are L2-normalized (unit length); the residual stream at these layers
+# has per-token norms ~20. Useful scales are therefore ~4-10, not <3. The layer
+# and scale used for evaluation are picked by methods/steering/sweep_steering.py
+# on held-out prompts (see steering_vectors/sweep_results.json).
+STEERING_SCALE_DEFAULT = 6.0
+STEERING_SCALES_TO_TRY = [4.0, 6.0, 8.0, 10.0]
 # Activation capture strategy: "mean" (over response tokens) or "last" (last token).
 # "mean" gives a more stable persona direction — see steering_utils.py.
 STEERING_CAPTURE = "mean"

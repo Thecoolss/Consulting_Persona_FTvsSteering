@@ -1,7 +1,9 @@
+# GPU stack: tested with torch 2.7.0, transformers 5.21.0, trl 1.16.0, peft 0.21.2.
+# train_qlora.py needs the trl 1.x API (SFTConfig, prompt/completion datasets).
 torch>=2.1.0
-transformers>=4.40.0
-peft>=0.10.0
-trl>=0.8.0
+transformers>=5.21,<6
+peft>=0.21
+trl>=1.16,<2
 bitsandbytes>=0.43.0
 datasets>=2.19.0
 accelerate>=0.30.0
