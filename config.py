@@ -85,6 +85,7 @@ OUTPUT_DIR = "outputs"
 ADAPTER_DIR = "finetuning_adapter"
 MERGED_MODEL_DIR = "merged_model"
 STEERING_VECTORS_DIR = "steering_vectors"
+STEERING_V2_DIR = "steering_vectors_v2"     # vectors from matched pairs + sweep v2
 RESULTS_DIR = "evaluation/results"
 
 TRAIN_DATA_PATH = os.path.join(DATA_DIR, "train_data.jsonl")
@@ -105,7 +106,8 @@ S3_PREFIX = "v1"
 #   s3://{bucket}/{prefix}/evaluation/    — eval results, charts
 
 # Directories that s3_sync.py manages
-S3_SYNC_DIRS = [DATA_DIR, OUTPUT_DIR, RESULTS_DIR, STEERING_VECTORS_DIR, ADAPTER_DIR]
+S3_SYNC_DIRS = [DATA_DIR, OUTPUT_DIR, RESULTS_DIR, STEERING_VECTORS_DIR, STEERING_V2_DIR,
+                ADAPTER_DIR]
 
 # ---------------------------------------------------------------------------
 # AWS — Bedrock (model IDs VERIFIED against the account via US inference profiles).
@@ -122,6 +124,11 @@ BEDROCK_REGION = "us-east-1"
 #   us.anthropic.claude-sonnet-4-6                 (confirmed fallback)
 BEDROCK_JUDGE_MODEL = os.environ.get(
     "BEDROCK_JUDGE_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+# Used only when the main judge refuses to score a response (empty reply with
+# stop_reason="refusal"). Those scores are tagged judge="fallback" in the cache
+# and counted in the analysis summary.
+BEDROCK_JUDGE_FALLBACK_MODEL = os.environ.get(
+    "BEDROCK_JUDGE_FALLBACK_MODEL", "us.anthropic.claude-sonnet-4-6")
 # Generator: a cheaper, DIFFERENT model than the judge (avoids the fine-tuned
 # model simply learning to mimic the judge's own style). Data gen is already
 # done, so this only matters if you regenerate data.
@@ -130,7 +137,10 @@ BEDROCK_GENERATOR_MODEL = os.environ.get(
 
 # Throttling / retry / concurrency
 BEDROCK_CALL_DELAY_SECONDS = 0.1   # small per-call delay (concurrency spaces load)
-BEDROCK_MAX_RETRIES = 4
+BEDROCK_MAX_RETRIES = 4      # transient errors (timeouts, 503s)
+BEDROCK_THROTTLE_RETRIES = 10  # rate-limit errors; jittered backoff up to 30s each
+# Sonnet 4.5 in this account accepts roughly 50 requests/minute. More than ~4
+# concurrent judge calls just produces throttling.
 BEDROCK_READ_TIMEOUT = 120   # seconds per call; a stalled socket raises & retries
 BEDROCK_MAX_CONCURRENCY = 8  # parallel Bedrock calls (well under the 5M TPM limit)
 
@@ -151,4 +161,5 @@ EC2_HOURLY_RATE = 1.006    # g5.xlarge on-demand, us-east-1 (verify at launch)
 BEDROCK_PRICING = {
     "us.anthropic.claude-sonnet-4-5-20250929-v1:0": {"input": 3.00, "output": 15.00},
     "us.anthropic.claude-haiku-4-5-20251001-v1:0": {"input": 1.00, "output": 5.00},
+    "us.anthropic.claude-sonnet-4-6": {"input": 3.00, "output": 15.00},  # assumed = 4.5
 }

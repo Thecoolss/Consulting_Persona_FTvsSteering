@@ -147,6 +147,62 @@ def steering(model, vector, layer_idx: int, scale: float):
         handle.remove()
 
 
+@contextmanager
+def multi_steering(model, vectors: dict, strengths: dict, preserve_norm: bool = False):
+    """Steering v2: add strengths[l] * vectors[l] at several layers at once.
+
+    strengths are absolute (already multiplied by the layer's typical activation
+    norm by the caller), so a smaller push at each of several layers can add up
+    without any single layer being pushed off-distribution.
+
+    preserve_norm: rescale each steered token back to its pre-steering norm.
+    This keeps activation magnitudes in the range the model was trained on,
+    which is the main cause of the repetitive collapse seen with v1.
+    Position 0 (attention sink) is never steered.
+    """
+    import torch
+
+    handles = []
+
+    def make_hook(v, s):
+        def hook(_module, _inp, output):
+            hs = output[0] if isinstance(output, tuple) else output
+            add = (s * v).to(hs.dtype)
+            start = 1 if hs.shape[1] > 1 else 0
+            seg = hs[:, start:, :]
+            new = seg + add
+            if preserve_norm:
+                old_n = seg.float().norm(dim=-1, keepdim=True)
+                new_n = new.float().norm(dim=-1, keepdim=True).clamp_min(1e-6)
+                new = (new.float() * (old_n / new_n)).to(hs.dtype)
+            if start:
+                hs = torch.cat([hs[:, :1, :], new], dim=1)
+            else:
+                hs = new
+            if isinstance(output, tuple):
+                return (hs,) + tuple(output[1:])
+            return hs
+        return hook
+
+    try:
+        for layer, v in vectors.items():
+            handles.append(_layer_module(model, layer).register_forward_hook(
+                make_hook(v.to(model.device), strengths[layer])))
+        yield
+    finally:
+        for h in handles:
+            h.remove()
+
+
+def load_vector_set(layers, directory) -> dict:
+    return {l: load_vector(l, directory) for l in layers}
+
+
+def load_norms(directory) -> dict:
+    with open(os.path.join(directory, "norms.json"), encoding="utf-8") as fh:
+        return {int(k): v["mean_resid_norm"] for k, v in json.load(fh).items()}
+
+
 def looks_degenerate(text: str) -> bool:
     """Crude check for broken generations: too short or highly repetitive."""
     words = re.findall(r"[A-Za-z']+", text)

@@ -41,13 +41,16 @@ def load_pairs(path: str) -> list[tuple[str, str]]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--pos", default=config.STEERING_POS_PATH)
+    ap.add_argument("--neg", default=config.STEERING_NEG_PATH)
+    ap.add_argument("--out-dir", default=config.STEERING_VECTORS_DIR)
     args = ap.parse_args()
 
     model_utils.preflight_hf()
     model_utils.set_seeds()
 
-    positives = load_pairs(config.STEERING_POS_PATH)
-    negatives = load_pairs(config.STEERING_NEG_PATH)
+    positives = load_pairs(args.pos)
+    negatives = load_pairs(args.neg)
     n = min(len(positives), len(negatives))
     positives, negatives = positives[:n], negatives[:n]
     if args.dry_run:
@@ -64,11 +67,11 @@ def main() -> None:
     t0 = time.time()
     vectors, norms = steering_utils.build_steering_vectors(
         model, tokenizer, positives, negatives, layers)
-    steering_utils.save_vectors(vectors, norms=norms)
+    steering_utils.save_vectors(vectors, directory=args.out_dir, norms=norms)
     elapsed = time.time() - t0
 
     print(f"\nExtracted {len(vectors)} layer vectors in {elapsed:.1f}s "
-          f"(est. ${elapsed / 3600 * config.EC2_HOURLY_RATE:.3f}) -> {config.STEERING_VECTORS_DIR}")
+          f"(est. ${elapsed / 3600 * config.EC2_HOURLY_RATE:.3f}) -> {args.out_dir}")
     print(f"{'layer':>5s} {'resid_norm':>10s} {'raw_diff':>9s}")
     for l in layers:
         print(f"{l:5d} {norms[l]['mean_resid_norm']:10.1f} {norms[l]['raw_diff_norm']:9.2f}")

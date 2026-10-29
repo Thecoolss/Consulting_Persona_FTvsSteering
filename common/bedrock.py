@@ -7,6 +7,7 @@ throttling delay, and running token/cost accounting.
 from __future__ import annotations
 
 import json
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -18,6 +19,10 @@ from botocore.exceptions import ClientError, ConnectionError as BotoConnectionEr
     ReadTimeoutError, ConnectTimeoutError
 
 import config
+
+
+class ModelRefusal(Exception):
+    """The model returned stop_reason='refusal' with no content."""
 
 
 @dataclass
@@ -96,7 +101,9 @@ class BedrockClient:
             body["system"] = system
 
         last_err: Exception | None = None
-        for attempt in range(config.BEDROCK_MAX_RETRIES):
+        throttle_retries = 0
+        attempt = 0
+        while attempt < config.BEDROCK_MAX_RETRIES:
             try:
                 resp = self.client.invoke_model(
                     modelId=model_id,
@@ -112,19 +119,34 @@ class BedrockClient:
                     usage.get("output_tokens", 0),
                 )
                 time.sleep(config.BEDROCK_CALL_DELAY_SECONDS)
-                return payload["content"][0]["text"]
+                content = payload.get("content") or []
+                if payload.get("stop_reason") == "refusal" or not content:
+                    # The model declined and returned no text. Retrying the same
+                    # model won't change that, so surface it to the caller.
+                    raise ModelRefusal(f"{model_id} refused (stop_reason="
+                                       f"{payload.get('stop_reason')})")
+                return content[0]["text"]
             except (ReadTimeoutError, ConnectTimeoutError, BotoConnectionError) as exc:
                 # Stalled/slow connection — back off and retry.
                 last_err = exc
                 time.sleep(2 ** attempt)
+                attempt += 1
                 continue
             except ClientError as exc:
                 code = exc.response["Error"]["Code"]
                 last_err = exc
-                if code in ("ThrottlingException", "TooManyRequestsException",
-                            "ServiceUnavailableException", "ModelTimeoutException"):
-                    wait = 2 ** attempt
-                    time.sleep(wait)
+                if code in ("ThrottlingException", "TooManyRequestsException"):
+                    # Rate limit: wait it out with jittered backoff (capped at 30s).
+                    # These retries have their own, larger budget so a busy
+                    # minute doesn't turn into a failed call.
+                    throttle_retries += 1
+                    if throttle_retries > config.BEDROCK_THROTTLE_RETRIES:
+                        break
+                    time.sleep(min(30, 2 ** throttle_retries) * (0.5 + random.random()))
+                    continue
+                if code in ("ServiceUnavailableException", "ModelTimeoutException"):
+                    time.sleep(2 ** attempt)
+                    attempt += 1
                     continue
                 raise
         raise RuntimeError(f"Bedrock call failed after retries: {last_err}")

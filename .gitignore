@@ -21,6 +21,7 @@ venv/
 merged_model/
 finetuning_adapter/
 steering_vectors/
+steering_vectors_v2/
 *.ckpt
 *.gguf
 
@@ -30,6 +31,14 @@ steering_vectors/
 data/train_data.jsonl
 data/steering_positive.jsonl
 data/steering_negative.jsonl
+data/steering_positive_v2.jsonl
+data/steering_negative_v2.jsonl
+
+# ---- Run logs / judge cache / dry-run artifacts ----
+logs/
+evaluation/results/judge_cache.jsonl
+*.dryrun
+evaluation/results/*_dryrun.json
 
 # ---- HF / caches ----
 .cache/

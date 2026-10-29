@@ -103,26 +103,59 @@ streamlit run app/streamlit_app.py --server.port 8501
 
 ## Status
 
-- **Data:** 636 fine-tuning pairs (from 805 generated, after jargon and
-  duplicate filters) and 247 aligned steering pairs.
-- **Generation:** done. 300 responses are stored in S3 under `v1/outputs/`:
-  baseline 50, prompting 150 (3 variants), fine-tuned 50, steered 50.
-- **Fine-tuning:** 3 epochs, 120 optimizer steps, 21 minutes on one A10G.
-  Mean training loss 1.35; last logged step loss 0.90.
-- **Steering:** the held-out sweep picked layer 12 at scale 6. Larger scales
-  produced degenerate text.
-- **Evaluation:** not run yet.
+Complete. 350 responses generated, all scored by the LLM judge, analyzed.
+
+- **Data:** 636 fine-tuning pairs and 247 aligned steering pairs (v1). Steering
+  v2 adds 219 *matched* contrastive pairs (each persona answer rewritten in plain
+  language at the same length).
+- **Fine-tuning:** QLoRA, 3 epochs, 120 optimizer steps, ~21 min on one A10G.
+  Mean training loss 1.35.
+- **Steering v1:** single layer, large absolute scale. Collapsed into repetition
+  past ~100 words (44/50 outputs degenerate).
+- **Steering v2:** matched pairs, norm-preserving hook, held-out two-stage sweep
+  picked layer 12 at alpha 0.5. Fixed the collapse (1/50) but the persona stayed
+  weak — one steering direction carries a register, not a specific vocabulary.
 
 ## Results
 
-_Populated after the evaluation run — see `evaluation/results/analysis_summary.md`,
-`radar.png`, and the per-dimension bar charts._
+LLM-as-judge (Claude Sonnet 4.5), 1-5 on 50 fixed prompts. Full tables, radar and
+per-dimension charts in `evaluation/results/`.
+
+| Method | Persona | Content | Fluency | Consistency | Naturalness | Mean |
+|---|---|---|---|---|---|---|
+| **Fine-tuned (QLoRA)** | 4.98 | 4.76 | 3.32 | 4.96 | 4.34 | **4.47** |
+| Prompt — detailed | 5.00 | 4.52 | 3.40 | 4.96 | 3.86 | 4.35 |
+| Prompt — medium | 5.00 | 4.40 | 3.42 | 4.80 | 3.92 | 4.31 |
+| Prompt — minimal | 4.98 | 3.48 | 3.94 | 4.04 | 2.34 | 3.76 |
+| Steering v2 | 3.70 | 4.27 | 3.76 | 2.82 | 1.63 | 3.24 |
+| Baseline (control) | 1.22 | 4.92 | 4.72 | 1.02 | 1.00 | 2.58 |
+| Steering v1 | 3.90 | 1.31 | 1.06 | 1.49 | 1.00 | 1.75 |
+
+Findings (paired Wilcoxon, Holm-corrected):
+
+- **Fine-tuning and the detailed/medium prompt are statistically tied** on persona
+  adherence; all three max it out. Fine-tuning edges ahead on naturalness and
+  content but not significantly.
+- **Prompt detail trades content for persona:** the minimal prompt still nails the
+  persona (4.98) but drops content relevance to 3.48, significantly below the
+  others.
+- **Every persona method costs fluency** (3.3-3.9 vs 4.72 baseline) — the judge
+  reads heavy jargon as awkward.
+- **Steering v2 fixed v1's collapse** (content 1.31 -> 4.27, fluency 1.06 -> 3.76,
+  both significant) but could not match prompting/fine-tuning on persona,
+  consistency or naturalness. It produces structured, mildly formal answers rather
+  than a sustained consultant voice.
+
+Caveats recorded in the data: 8/1750 judge calls were refused by both the primary
+and fallback judge and are unscored; 18 were scored by the fallback judge
+(Sonnet 4.6) and tagged `judge: "fallback"` in `evaluation_results.json`.
 
 ## Cost & AWS services
 
 - **EC2** g5.xlarge (~$1/hr) — GPU compute for fine-tuning, steering, inference
 - **S3** — artifact storage (survives instance termination)
-- **Bedrock** — Claude Haiku 4.5 (data gen) + Claude Sonnet 4.5 (judge)
+- **Bedrock** — Claude Haiku 4.5 (data gen) + Claude Sonnet 4.5 (judge, with
+  Sonnet 4.6 as a refusal fallback)
 - **CloudWatch** — training-loss metrics
 
 > Remember to **stop/terminate the EC2 instance** when done. S3 holds all

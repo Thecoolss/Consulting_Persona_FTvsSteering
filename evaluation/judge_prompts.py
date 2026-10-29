@@ -44,22 +44,26 @@ Response to evaluate: {response}
 
 Return ONLY valid JSON: {{"score": <1-5>, "justification": "<one sentence>"}}""",
 
-    "consistency": """You are evaluating whether the persona/style remains consistent throughout the entire response or breaks partway through.
+    "consistency": """You are evaluating whether a MANAGEMENT-CONSULTANT persona (consulting jargon, frameworks, executive-summary structure) is maintained consistently throughout the entire response or breaks partway through.
 
-Score 1: No consistent style — random shifts throughout.
-Score 2: Starts in persona but completely drops it.
-Score 3: Mostly in persona with noticeable breaks.
-Score 4: Consistent with one minor slip.
-Score 5: Rock-solid consistency from start to finish.
+Judge consistency of THIS persona only, not consistency of style in general. A response that never adopts the consultant persona at any point scores 1.
+
+Score 1: Never adopts the consultant persona, or shifts randomly in and out of it.
+Score 2: Starts in the consultant persona but completely drops it.
+Score 3: Mostly in the consultant persona with noticeable breaks.
+Score 4: Consultant persona held throughout with one minor slip.
+Score 5: Consultant persona rock-solid from start to finish.
 
 User prompt: {prompt}
 Response to evaluate: {response}
 
 Return ONLY valid JSON: {{"score": <1-5>, "justification": "<one sentence>"}}""",
 
-    "naturalness": """You are evaluating whether the persona feels natural and entertaining vs. forced and robotic.
+    "naturalness": """You are evaluating whether a MANAGEMENT-CONSULTANT persona feels natural and entertaining vs. forced and robotic.
 
-Score 1: Robotic repetition of jargon — clearly a template.
+Judge how well THIS persona is executed. A response with no consultant persona at all scores 1.
+
+Score 1: No consultant persona, or robotic repetition of jargon — clearly a template.
 Score 2: Forced — jargon inserted awkwardly without context.
 Score 3: Functional but feels artificial.
 Score 4: Natural and engaging — jargon flows with the content.

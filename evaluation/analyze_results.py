@@ -31,13 +31,15 @@ def load_results() -> list[dict]:
 
 
 def method_key(rec: dict) -> str:
-    """Collapse to a comparable method label.
+    """Label used for every comparison: one label per method AND variant.
 
-    Prompting keeps its best/named variant; steering may carry layer/scale in
-    the variant. For the headline comparison we group by `method`, but keep a
-    detailed per-variant breakdown too.
+    Averaging the three prompting variants together would hide the most useful
+    result (how much prompt detail matters), so each variant gets its own label,
+    e.g. "prompting:detailed". Methods with a single variant keep a bare name.
     """
-    return rec["method"]
+    if rec["variant"] in ("none", "qlora"):
+        return rec["method"]
+    return f"{rec['method']}:{rec['variant']}"
 
 
 def build_frame(results: list[dict]):
@@ -48,7 +50,7 @@ def build_frame(results: list[dict]):
             if sc.get("score") is None:
                 continue
             rows.append({
-                "method": r["method"],
+                "method": method_key(r),
                 "variant": r["variant"],
                 "prompt_id": r["prompt_id"],
                 "category": r.get("category", ""),
@@ -113,12 +115,16 @@ def paired_tests(df):
                         "mean_a": float(np.mean(x)), "mean_b": float(np.mean(y)),
                         "p_raw": float(p), "effect_rbc": float(rbc)})
 
-    # Holm-Bonferroni across the whole family
+    # Holm-Bonferroni across the whole family (step-down; adjusted p-values are
+    # made monotone with a running max, as the procedure requires).
     raw.sort(key=lambda r: r["p_raw"])
     m = len(raw)
+    running = 0.0
     for i, r in enumerate(raw):
-        r["p_holm"] = min(1.0, r["p_raw"] * (m - i))
+        running = max(running, min(1.0, r["p_raw"] * (m - i)))
+        r["p_holm"] = running
         r["significant"] = r["p_holm"] < 0.05
+    raw.sort(key=lambda r: (config.EVAL_DIMENSIONS.index(r["dimension"]), r["a"], r["b"]))
     return raw
 
 
@@ -152,25 +158,59 @@ def radar_chart(summary, out_path):
     plt.close(fig)
 
 
+# Short, readable x-axis labels and a stable, meaningful order (best -> worst
+# overall), so every bar chart lines methods up the same way.
+METHOD_LABELS = {
+    "finetuning": "Fine-tuned",
+    "prompting:detailed": "Prompt\n(detailed)",
+    "prompting:medium": "Prompt\n(medium)",
+    "prompting:minimal": "Prompt\n(minimal)",
+    "steering:v2_L12_a0.5_pn": "Steering v2",
+    "baseline": "Baseline",
+    "steering:layer12_scale6.0": "Steering v1",
+}
+METHOD_ORDER = list(METHOD_LABELS)
+
+
+def _ordered_methods(summary) -> list[str]:
+    present = set(summary["method"].unique())
+    ordered = [m for m in METHOD_ORDER if m in present]
+    ordered += sorted(present - set(ordered))  # any unexpected labels, at the end
+    return ordered
+
+
 def bar_charts(summary, out_dir):
     import matplotlib.pyplot as plt
-    import numpy as np
 
-    dims = [d for d in config.EVAL_DIMENSIONS
-            if d in summary["dimension"].unique()]
-    methods = sorted(summary["method"].unique())
+    dims = [d for d in config.EVAL_DIMENSIONS if d in summary["dimension"].unique()]
+    methods = _ordered_methods(summary)
+    labels = [METHOD_LABELS.get(m, m) for m in methods]
+    # colour persona methods and controls differently so the eye groups them
+    colors = ["#c8a24b" if m in ("baseline",) else
+              "#8a8f98" if m.startswith("steering") else "#1f3a5f" for m in methods]
+
     for dim in dims:
         means, errs = [], []
         for method in methods:
-            row = summary[(summary["method"] == method) &
-                          (summary["dimension"] == dim)]
+            row = summary[(summary["method"] == method) & (summary["dimension"] == dim)]
             means.append(float(row["mean"].iloc[0]) if len(row) else 0.0)
             errs.append(float(row["ci95"].iloc[0]) if len(row) else 0.0)
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.bar(methods, means, yerr=errs, capsize=5, color="#1f3a5f")
-        ax.set_ylim(0, 5)
-        ax.set_title(f"{dim.replace('_', ' ').title()} (mean ± 95% CI)")
-        ax.set_ylabel("score (1-5)")
+
+        fig, ax = plt.subplots(figsize=(9, 5))
+        bars = ax.bar(range(len(methods)), means, yerr=errs, capsize=4,
+                      color=colors, width=0.7)
+        ax.set_xticks(range(len(methods)))
+        ax.set_xticklabels(labels, fontsize=9)
+        ax.set_ylim(0, 5.4)
+        ax.set_yticks(range(6))
+        ax.set_title(f"{dim.replace('_', ' ').title()}  (mean \u00b1 95% CI)",
+                     fontsize=12)
+        ax.set_ylabel("judge score (1-5)")
+        ax.grid(axis="y", alpha=0.3)
+        ax.set_axisbelow(True)
+        for b, m in zip(bars, means):
+            ax.text(b.get_x() + b.get_width() / 2, m + 0.12, f"{m:.2f}",
+                    ha="center", va="bottom", fontsize=8)
         fig.tight_layout()
         fig.savefig(os.path.join(out_dir, f"bar_{dim}.png"), dpi=150)
         plt.close(fig)
